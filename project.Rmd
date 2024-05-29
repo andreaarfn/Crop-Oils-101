@@ -1,0 +1,261 @@
+---
+title: "Crop Oil Yield Dashboard"
+author: "Andrea Arifin"
+date: "2024-05-29"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+# About
+
+### Welcome to the Crop Oil Yield Dashboard!
+
+This dashboard offers an in-depth analysis of crop oil production and harvested area using the latest FAOSTAT data retrieved in May 2024.
+https://www.fao.org/faostat/en/#data/QCL
+
+------------------------------------------------------------------------
+
+Thank you for using the Crop Oil Yield Dashboard! Your feedback is valuable, so please don't hesitate to share your thoughts on how we can improve this tool.
+
+### What You'll Find:
+
+-   **Interactive Line Graphs**: Explore the trends over time for the total harvested area and production of different crop oils.
+-   **Heat Map**: Visualize the geographical distribution of crop oil production across various countries.
+
+### Why This Matters:
+
+Crop oils are a crucial part of the global agricultural market, providing essential inputs for food, fuel, and industrial products. By understanding the trends in production and harvested areas, stakeholders can make informed decisions that impact food security, economic development, and environmental sustainability.
+
+# Line Graphs {#line-graphs}
+
+```{r}
+# Loading libraries and data set
+library(shiny)
+library(plotly)
+library(dplyr)
+library(readr)
+data <- read_csv("cropoil.csv")  #FAOSTAT data (Retrieved May 2024)
+
+# Filtering data
+crop_to_oil_map <- c("Oil palm fruit" = "Palm Oil", 
+                     "Soya beans" = "Soybean Oil", 
+                     "Sunflower seed" = "Sunflower-seed Oil", 
+                     "Olives" = "Olive Oil", 
+                     "Coconuts, in shell" = "Coconut Oil")
+
+rename <- c("Sunflower-seed oil, crude" = "Sunflower-seed Oil",
+            "Olive oil" = "Olive Oil",
+            "Palm oil" = "Palm Oil",
+            "Soya bean oil" = "Soybean Oil",
+            "Coconut oil" = "Coconut Oil")
+
+total_area <- data %>%
+  filter(Element == "Area harvested", Item %in% names(crop_to_oil_map)) %>%
+  group_by(Year, Item) %>%
+  summarise(TotalHarvest = sum(Value, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(Crop = crop_to_oil_map[Item]) %>%
+  select(-Item)
+
+total_production <- data %>%
+  filter(Element == "Production", Item %in% names(rename)) %>%
+  group_by(Year, Item) %>%
+  summarise(TotalProduction = sum(Value, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(Crop = rename[Item]) %>%
+  select(-Item)
+
+oils <- unique(total_production$Crop)
+
+# Define UI
+ui_line_graph <- fluidPage(
+  titlePanel("Crop Oil Production and Harvested Area"),
+  
+  sidebarPanel(
+    checkboxGroupInput("graph_visibility", "Select Graphs to Display", 
+                       choices = list("Harvested Area" = "area", "Production" = "production"),
+                       selected = c("area", "production")),
+    checkboxGroupInput("selected_oils", "Select Crop Oils", choices = oils, selected = oils)
+  ),
+  
+  mainPanel(
+    plotlyOutput("plot"),
+    uiOutput("message")  # Output for displaying messages
+  ),
+  
+  tags$style(HTML("
+    #message {
+      font-size: 24px;
+      text-align: center;
+      color: red;
+    }
+  "))
+)
+
+# Define server logic
+server_line_graph <- function(input, output) {
+  output$plot <- renderPlotly({
+    selected_oils <- input$selected_oils
+    visible_graphs <- input$graph_visibility
+    
+    # Check if any graphs are selected
+    if (length(visible_graphs) == 0) {
+      return(NULL)
+    }
+    
+    show_legend_area <- ifelse(length(visible_graphs) == 1 && "area" %in% visible_graphs, TRUE, FALSE)
+    show_legend_production <- ifelse("production" %in% visible_graphs, TRUE, FALSE)
+    
+    plot_area <- total_area %>%
+      filter(Crop %in% selected_oils) %>%
+      plot_ly(
+        x = ~Year, y = ~TotalHarvest,
+        type = 'scatter',
+        mode = 'lines+markers',
+        color = ~Crop,
+        showlegend = show_legend_area
+      ) %>%
+      layout(
+        title = "Total Harvested Area (ha)",
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Total Harvested Area (ha)"),
+        legend = list(orientation = 'h', y = -0.2)  # Adjust the legend position
+      )
+    
+    plot_production <- total_production %>%
+      filter(Crop %in% selected_oils) %>%
+      plot_ly(
+        x = ~Year, y = ~TotalProduction,
+        type = 'scatter',
+        mode = 'lines+markers',
+        color = ~Crop,
+        showlegend = show_legend_production
+      ) %>%
+      layout(
+        title = "Total Production (tonnes)",
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Total Production (tonnes)"),
+        legend = list(orientation = 'h', y = -0.2)  # Adjust the legend position
+      )
+    
+    if (length(visible_graphs) == 1) {
+      if ("area" %in% visible_graphs) {
+        plot_area
+      } else {
+        plot_production
+      }
+    } else {
+      subplot(plot_area, plot_production, nrows = 1, titleX = TRUE, titleY = TRUE) %>%
+        layout(
+          title = "Total Harvested Area and Total Production per Crop Oil",
+          legend = list(orientation = 'h', y = -0.2)  # Adjust the legend position for the subplot
+        )
+    }
+  })
+
+  # Message output when no graphs are selected
+  output$message <- renderUI({
+    if (length(input$graph_visibility) == 0) {
+      div("Please select a graph.", id = "message")
+    } else {
+      NULL
+    }
+  })
+}
+
+# Running the app
+shinyApp(ui = ui_line_graph, server = server_line_graph)
+```
+
+# Heat Map {#heat-map}
+
+```{r}
+# Importing all required packages and data set
+library(shiny)
+library(leaflet)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+data <- read_csv("cropoil.csv") #FAOSTAT data (Retrieved May 2024)
+
+# Filtering through data 
+rename_map <- c("Sunflower-seed oil, crude" = "Sunflower-seed Oil",
+                "Oil of maize" = "Corn Oil",
+                "Olive oil" = "Olive Oil", 
+                "Palm oil" = "Palm Oil",
+                "Soya bean oil" = "Soybean Oil",
+                "Coconut oil" = "Coconut Oil")
+
+data$Item <- rename_map[data$Item]
+
+selected_oils <- c("Palm Oil", "Soybean Oil", "Sunflower-seed Oil", "Olive Oil", "Coconut Oil")
+
+data_summarized <- data %>%
+  group_by(Area, Item, Year) %>%
+  summarise(TotalProduction = sum(Value, na.rm = TRUE), .groups = 'drop') %>%
+  filter(Item %in% selected_oils)
+
+countries <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Creating UI
+ui_heat_map <- fluidPage(
+  titlePanel("Crop Oil Production Heat Map"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("selectedOil", "Choose an Oil:", choices = selected_oils),
+      sliderInput("selectedYear", "Select Year:", min = 1972, max = 2021, value = 1997, step = 1,
+                  sep = "", pre = "", post = "")
+    ),
+    mainPanel(
+      leafletOutput("map")
+    )
+  )
+)
+
+# Creating heat map
+server_heat_map <- function(input, output, session) {
+  observe({
+    oil_choices <- unique(data_summarized$Item)
+    year_choices <- unique(data_summarized$Year)
+    updateSelectInput(session, "selectedOil", choices = setNames(oil_choices, oil_choices))
+    updateSliderInput(session, "selectedYear", min = min(year_choices), max = max(year_choices))
+  })
+  
+  output$map <- renderLeaflet({
+    req(input$selectedOil, input$selectedYear)
+
+    data_filtered <- data_summarized %>%
+      filter(Item == input$selectedOil, Year == as.numeric(input$selectedYear)) %>%
+      right_join(countries, by = c("Area" = "name"))
+
+    data_filtered$TotalProduction <- replace_na(data_filtered$TotalProduction, 0)
+    data_filtered <- st_as_sf(data_filtered)
+
+    pal <- colorNumeric(palette = "viridis", domain = data_filtered$TotalProduction)
+    colorFunction <- function(production) { ifelse(production > 0, pal(production), "#d3d3d3") }
+
+    map <- leaflet(data = data_filtered) %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      setView(lng = 0, lat = 0, zoom = 2) %>%
+      addPolygons(fillColor = ~colorFunction(TotalProduction),
+                  color = "#444444", weight = 1, smoothFactor = 0.5,
+                  opacity = 1.0, fillOpacity = 0.7,
+                  highlightOptions = highlightOptions(color = "white", weight = 2,
+                                                      bringToFront = TRUE),
+                  label = ~paste(Area, "| Total Production (tonnes):", TotalProduction)) %>%
+      addLegend("bottomright", pal = pal, values = ~TotalProduction,
+                title = "Total Production",
+                labFormat = labelFormat(prefix = ""),
+                opacity = 1.0)
+    map
+  })
+}
+
+# Running the app
+shinyApp(ui = ui_heat_map, server = server_heat_map)
+
+```
