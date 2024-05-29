@@ -13,15 +13,15 @@ https://www.fao.org/faostat/en/#data/QCL
 ## Required Libraries
 
 Download the following libraries in R-Studio by copying these lines in Console:
-install.packages(shiny)
-install.packages(plotly)
-install.packages(dplyr)
-install.packages(readr)
-install.packages(leaflet)
-install.packages(tidyr)
-install.packages(rnaturalearth)
-install.packages(rnaturalearthdata)
-install.packages(sf)
+- install.packages(shiny)
+- install.packages(plotly)
+- install.packages(dplyr)
+- install.packages(readr)
+- install.packages(leaflet)
+- install.packages(tidyr)
+- install.packages(rnaturalearth)
+- install.packages(rnaturalearthdata)
+- install.packages(sf)
 
 
 ## How to Run
